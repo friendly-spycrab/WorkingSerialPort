@@ -18,7 +18,7 @@ namespace SerialPort
         public StopBits StopBitType { get; set; } = StopBits.ONE5STOPBITS;
         #endregion
 
-        private Regex IsValidPortName = new Regex("COM([0-9][0-9][0-9]|[0-9][0-9]|[0-9])$",RegexOptions.Compiled);
+        private Regex IsValidPortName = new Regex("^COM[0-9]{1,3}$", RegexOptions.Compiled);
 
         //The createfile is used for opening the serial port.
         [DllImport("kernel32")]
