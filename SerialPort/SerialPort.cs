@@ -3,11 +3,14 @@ using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using SerialPort.Structs;
 using SerialPort.Enums;
+using SerialPort.Events;
+using System.Collections.Generic;
 
 namespace SerialPort
 {
     public class WorkingSerialPort
     {
+        public event OutputReceivedEventHandler OutputReceived;
 
         #region Properties
         public bool IsOpen {  get; private set; }
@@ -42,6 +45,13 @@ namespace SerialPort
         [DllImport("kernel32.dll")]
         static extern uint GetLastError();
 
+        [DllImport("kernel32.dll")]
+        static extern bool SetCommMask(IntPtr hFile,uint dwEvtMask);
+
+        [DllImport("kernel32.dll")]
+        static extern bool WaitCommEvent(IntPtr hFile, ulong lpEvtMask, OVERLAPPED lpOverlapped);
+
+
         //Gives generic read access
         const uint GENERIC_READ = 0x80000000;
 
@@ -53,6 +63,11 @@ namespace SerialPort
 
         const uint FILE_FLAG_OVERLAPPED = 0x40000000;
 
+        const uint EV_RXCHAR = 0x0001;
+
+        const uint EV_TXEMPTY = 0x0004;
+
+        const ulong INFINITE = 0xffffffffL;
         IntPtr PortHandle;
 
 
@@ -81,6 +96,8 @@ namespace SerialPort
                  
             });
 
+            SetCommMask(PortHandle,EV_RXCHAR|EV_TXEMPTY);
+
             IsOpen = true;
             return true;
         }
@@ -92,7 +109,7 @@ namespace SerialPort
         /// <returns></returns>
         public ulong Write(byte[] Data)
         {
-            ulong NumberOfBytesWritten = 0;
+            ulong NumberOfBytesWritten;
 
             if (!IsOpen)
                 return 0;
@@ -104,19 +121,52 @@ namespace SerialPort
             return NumberOfBytesWritten;
         }
 
+        /// <summary>
+        /// Reads data from the serial port
+        /// </summary>
+        /// <param name="buffer"></param>
+        /// <param name="NumberOfBytesToRead"></param>
+        /// <returns></returns>
         public ulong Read(byte[] buffer,uint NumberOfBytesToRead)
         {
-            ulong NumberOfBytesWritten = 0;
+            ulong NumberOfBytesRead;
 
             if (!IsOpen)
                 return 0;
 
             OVERLAPPED Overlapped = new OVERLAPPED();
 
-            ReadFile(PortHandle, buffer, NumberOfBytesToRead, out NumberOfBytesWritten, ref Overlapped);
+            ReadFile(PortHandle, buffer, NumberOfBytesToRead, out NumberOfBytesRead, ref Overlapped);
 
-            return NumberOfBytesWritten;
+            return NumberOfBytesRead;
         }
+
+        private void CheckForOutputLoop()
+        {
+            while (IsOpen)
+            {
+                if(WaitCommEvent(PortHandle,EV_RXCHAR|EV_TXEMPTY,new OVERLAPPED() { EventHandle = (IntPtr)INFINITE}))
+                {
+                    byte[] Buffer = new byte[256];
+                    ulong NumberOfBytesRead = Read(Buffer, (uint)256);
+                    if (NumberOfBytesRead > 0)
+                    {
+                        List<byte> ByteList = new List<byte>(Buffer);
+                        OnOutputReceived(ByteList.GetRange(0, (int)NumberOfBytesRead).ToArray());
+                    }
+
+                }
+            }
+
+        }
+
+        protected virtual void OnOutputReceived(byte[] output)
+        {
+            OutputReceived?.Invoke(this,new OutputReceivedArgs() { data = output });
+
+        }
+
+        
 
     }
 
